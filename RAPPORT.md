@@ -111,3 +111,76 @@ Convertir chaque champ dans son bon type pour créer une carte des observations.
 ✓ Au moins 4 anomalies de natures différentes identifiées avec comptes exacts
 ✓ Origine identifiée pour chacune (témoin, capteur, transmission)
 ✓ La colonne `country` inutilisable a été identifiée (>12k valeurs manquantes)
+
+---
+
+## Phase 3: Le Conseil veut trier les canulars
+
+### Objective
+
+Détecter automatiquement les signalements suspects (canulars) en utilisant une heuristique simple appliquée à l'ensemble des 88 675 observations.
+
+### Règle appliquée (énoncée en une phrase)
+
+**Un signalement est marqué comme potentiellement canular si son champ commentaire est vide ou contient moins de 5 caractères, ce qui indique l'absence totale de description d'observation.**
+
+### Paramètres de détection
+
+| Paramètre | Valeur |
+|-----------|--------|
+| **Seuil appliqué** | Commentaire vide OU < 5 caractères |
+| **Total signalements analysés** | 88 675 |
+| **Signalements marqués canulars** | **73** |
+| **Proportion du total** | **0.08%** (73/88675) |
+
+### Résultats détaillés
+
+#### Canulars détectés (73 cas)
+
+Les 73 signalements détectés partagent une caractéristique commune : l'absence de description.
+
+**Exemples :**
+- Ligne 3240 : Commentaire complètement vide (6 caractères = spaces) - `[VIDE]`
+- Ligne 4815 : Commentaire minimal `Disk` (4 caractères)
+- Ligne 5731 : Commentaire ultra-court `UFO.` (4 caractères)
+
+#### Limitations de la règle
+
+La règle produit à la fois des **faux positifs** et des **faux négatifs**.
+
+##### Faux positifs (vrais témoignages marqués à tort comme canulars) : 16 cas
+
+La règle attrape à tort certaines véritables observations qui sont simplement énoncées très brièvement mais dont le mot-clé indique une vraie observation :
+
+- **Ligne 5731** : Commentaire `UFO.` (4 chars) → Le mot-clé "UFO" indique clairement une vraie observation
+- **Ligne 13345** : Commentaire `UFO` (3 chars) → Vrai témoignage, simplement peu détaillé
+- **Ligne 14538** : Commentaire `UFO` (3 chars) → Autre cas similaire
+
+**Conclusion sur les faux positifs** : 16 véritables témoignages sont rejetés par notre règle, même si brefs. Ils contiennent des mots-clés descriptifs (`UFO`, `light`, `disc`, `craft`, etc.) qui indiquent une intention de rapporter une observation.
+
+##### Faux négatifs (canulars non détectés) : Indéterminé mais probable
+
+La règle RATE certains canulars qui utilisent des commentaires génériques ou bidons mais dépassant le seuil de 5 caractères :
+
+- Commentaires génériques comme : `"unknown"`, `"don't know"`, `"not sure"`, `"unclear"`, `"no comment"`
+- Ces expressions (5-20 caractères) ne décrivent aucune observation réelle mais ne sont pas capturées par notre seuil
+
+**Conclusion sur les faux négatifs** : Des canulars avec descriptions génériques (5+ chars) ne sont pas détectés. Cela représente un biais vers les canulars "minimalistes" plutôt que les "bla-bla".
+
+### Décisions Phase 3
+
+- Seuil choisi : **< 5 caractères** (explicitement nommé, compréhensible par un non-expert)
+- Approche : Détection simple, pas de machine learning ni heuristique complexe
+- Résultat : **73 signalements suspects** sur 88 675 (0.08%)
+- Le ratio bas (0.08%) suggère que la plupart des signalements, même brefs, contiennent au minimum quelques mots descriptifs
+
+### Validation
+
+✓ Règle énoncée en une seule phrase, compréhensible par un conseiller
+✓ Nombre exact de canulars détectés : 73
+✓ Proportion calculée : 0.08%
+✓ Seuil explicitement nommé : < 5 caractères
+✓ Au moins une limitation identifiée :
+  - Faux positif : "UFO." marqué à tort comme canular alors que c'est une vraie observation
+  - Faux négatif : Commentaires génériques (5-20 chars) non détectés
+

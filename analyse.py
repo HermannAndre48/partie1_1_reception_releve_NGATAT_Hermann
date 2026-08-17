@@ -3,6 +3,7 @@
 Analyse des données OVNI
 Phase 1: Ouvrir la caisse
 Phase 2: Rien n'est du bon type
+Phase 3: Trier les canulars
 """
 
 import csv
@@ -381,6 +382,118 @@ def format_phase2_report(analysis: Dict[str, Any]) -> str:
     return "\n".join(report)
 
 
+def detect_hoax(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """
+    Détecte les canulars (signalements suspects).
+    
+    Règle: Un signalement est suspecté d'être un canular si son commentaire
+    est vide ou contient moins de 5 caractères, ce qui indique une absence
+    totale de description d'un supposé événement OVNI.
+    """
+    hoaxes = []
+    
+    for i, row in enumerate(loaded_rows, start=1):
+        comments = row['comments'].strip()
+        
+        # Détecter commentaires vides ou quasi-vides (seuil: < 5 caractères)
+        if len(comments) < 5:
+            hoaxes.append({
+                'line': i,
+                'datetime': row['datetime'],
+                'city': row['city'],
+                'comments': comments if comments else '[VIDE]',
+                'latitude': row['latitude'],
+                'longitude': row['longitude']
+            })
+    
+    # Analyser les faux positifs et négatifs
+    false_positives = []
+    
+    # Certains commentaires courts pourraient être valides (exemple: "UFO" ou "2 lights")
+    # Ces sont des faux positifs - vrais témoignages malgré la brièveté
+    for hoax in hoaxes:
+        comm = hoax['comments'].lower()
+        if any(word in comm for word in ['light', 'ufo', 'disc', 'craft', 'ship', 'orb', 'beam']):
+            false_positives.append(hoax['line'])
+    
+    # Compter faux négatifs (commentaires longs mais manifestement faux)
+    false_negatives = []
+    for row in loaded_rows:
+        comments = row['comments']
+        # Commentaires génériques/bidons courts (5-20 chars)
+        if 5 <= len(comments.strip()) < 20:
+            stripped = comments.strip().lower()
+            if stripped in ['unknown', 'don\'t know', 'not sure', 'unclear', 'no comment', 'unknown ', 'dk', 'n/a']:
+                false_negatives.append(row)
+    
+    return {
+        'hoaxes': hoaxes,
+        'count': len(hoaxes),
+        'proportion': len(hoaxes) / len(loaded_rows) if loaded_rows else 0,
+        'false_positives': false_positives,
+        'false_positives_examples': [h for h in hoaxes if h['line'] in false_positives][:3],
+        'false_negatives_examples': false_negatives[:3]
+    }
+
+
+def format_phase3_report(hoax_analysis: Dict[str, Any], total_rows: int) -> str:
+    """Formate le rapport Phase 3."""
+    report = []
+    
+    report.append("\n" + "=" * 70)
+    report.append("PHASE 3: LE CONSEIL VEUT TRIER LES CANULARS")
+    report.append("=" * 70)
+    
+    report.append("\n🎯 RÈGLE APPLIQUÉE (en une phrase):")
+    report.append("-" * 70)
+    report.append("Un signalement est marqué comme potentiellement canular si son champ")
+    report.append("commentaire est vide ou contient moins de 5 caractères, ce qui indique")
+    report.append("l'absence totale de description d'observation.")
+    
+    count = hoax_analysis['count']
+    proportion = hoax_analysis['proportion']
+    
+    report.append(f"\n📊 RÉSULTATS:")
+    report.append("-" * 70)
+    report.append(f"Signalements marqués comme canulars: {count}")
+    report.append(f"Proportion du total: {proportion*100:.2f}% ({count}/{total_rows})")
+    report.append(f"Seuil appliqué: < 5 caractères")
+    
+    report.append(f"\n⚠️  EXEMPLES D'ERREURS DE LA RÈGLE:")
+    report.append("-" * 70)
+    
+    # Faux positifs
+    if hoax_analysis['false_positives_examples']:
+        report.append(f"\n❌ FAUX POSITIFS (vraies observations marquées à tort comme canulars):")
+        report.append(f"   La règle ATTRAPE À TORT {len(hoax_analysis['false_positives'])} cas")
+        report.append(f"   Exemples de vrais témoignages trop brefs:")
+        for example in hoax_analysis['false_positives_examples']:
+            keywords = [w for w in ['light','ufo','disc','craft','ship','orb','beam'] if w in example['comments'].lower()]
+            if keywords:
+                report.append(f"   Ligne {example['line']}: '{example['comments']}'")
+                report.append(f"     → Le mot-clé '{keywords[0]}' indique une vraie observation")
+    
+    # Faux négatifs
+    if hoax_analysis['false_negatives_examples']:
+        report.append(f"\n❌ FAUX NÉGATIFS (canulars non détectés):")
+        report.append(f"   La règle RATE certains canulars avec commentaires génériques")
+        report.append(f"   Exemples: commentaires comme 'unknown', 'don\\'t know', 'not sure', etc.")
+    else:
+        report.append(f"\n❌ FAUX NÉGATIFS (canulars non détectés):")
+        report.append(f"   La règle RATE les commentaires génériques/bidons (5-20 chars)")
+        report.append(f"   Exemples: 'unknown', 'don\\'t know', 'not sure', 'unclear', 'no comment'")
+    
+    # Exemples positifs
+    if hoax_analysis['hoaxes']:
+        report.append(f"\n📝 EXEMPLES DÉTECTÉS COMME CANULARS (premiers 3):")
+        report.append("-" * 70)
+        for hoax in hoax_analysis['hoaxes'][:3]:
+            report.append(f"Ligne {hoax['line']}: {hoax['datetime']} - {hoax['city']}")
+            report.append(f"  Commentaire: '{hoax['comments']}' ({len(hoax['comments'])} chars)")
+    
+    return "\n".join(report)
+
+
 def main():
     filepath = Path('releves_klaxo3.csv')
     
@@ -424,13 +537,30 @@ def main():
     print(f"  Coordonnées (0,0): {len(analysis['special_cases']['coordinates_zero_zero'])}")
     print(f"  Country vides: {anomalies['country']['empty']} / {analysis['total_rows']}")
     
+    # ========== PHASE 3 ==========
+    print("\n\nPHASE 3: Trier les canulars")
+    print("-" * 70)
+    
+    # Détecter les canulars
+    hoax_analysis = detect_hoax(loaded_rows)
+    
+    # Afficher le rapport Phase 3
+    print(format_phase3_report(hoax_analysis, len(loaded_rows)))
+    
+    # Résumé
+    print(f"\n\nRÉSUMÉ PHASE 3:")
+    print(f"  Canulars détectés: {hoax_analysis['count']}")
+    print(f"  Proportion: {hoax_analysis['proportion']*100:.2f}%")
+    print(f"  Seuil: < 5 caractères")
+    
     return {
         'phase1': {
             'total_lines': total_lines,
             'loaded_rows': len(loaded_rows),
             'problematic_rows': len(problematic_rows)
         },
-        'phase2': analysis
+        'phase2': analysis,
+        'phase3': hoax_analysis
     }
 
 

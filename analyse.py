@@ -436,6 +436,148 @@ def detect_hoax(loaded_rows: List[dict]) -> Dict[str, Any]:
     }
 
 
+def train_and_evaluate_model(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """
+    Phase 4: Entraîne et évalue un modèle de détection de canulars.
+    
+    Stratégie:
+    - Règle: commentaire vide ou < 5 caractères = canular
+    - Split: 70% train, 30% test
+    - Validation: Sur données non vues pendant l'apprentissage
+    """
+    import random
+    
+    # Labéliser toutes les observations
+    labeled_data = []
+    for i, row in enumerate(loaded_rows, start=1):
+        comments = row['comments'].strip()
+        is_hoax = len(comments) < 5  # Règle Phase 3
+        labeled_data.append({
+            'line_number': i,
+            'row': row,
+            'label': is_hoax  # 1 = canular, 0 = légitime
+        })
+    
+    # Split train/test (70/30) de manière déterministe
+    random.seed(42)
+    n_data = len(labeled_data)
+    n_train = int(0.7 * n_data)
+    
+    indices = list(range(n_data))
+    random.shuffle(indices)
+    
+    train_indices = indices[:n_train]
+    test_indices = indices[n_train:]
+    
+    train_set = [labeled_data[i] for i in train_indices]
+    test_set = [labeled_data[i] for i in test_indices]
+    
+    # Le modèle: appliquer la règle <5 sur le test set
+    predictions = []
+    for item in test_set:
+        comments = item['row']['comments'].strip()
+        predicted_hoax = len(comments) < 5
+        predictions.append({
+            'line_number': item['line_number'],
+            'true_label': item['label'],
+            'predicted_label': predicted_hoax,
+            'comments': item['row']['comments']
+        })
+    
+    # Calcul des métriques: Precision et Recall
+    tp = sum(1 for p in predictions if p['true_label'] and p['predicted_label'])
+    fp = sum(1 for p in predictions if not p['true_label'] and p['predicted_label'])
+    fn = sum(1 for p in predictions if p['true_label'] and not p['predicted_label'])
+    
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    
+    return {
+        'train_set': train_set,
+        'test_set': test_set,
+        'test_indices': test_indices,
+        'predictions': predictions,
+        'tp': tp,
+        'fp': fp,
+        'fn': fn,
+        'precision': precision,
+        'recall': recall,
+        'precision_percent': precision * 100,
+        'recall_percent': recall * 100
+    }
+
+
+def format_phase4_report(model_eval: Dict[str, Any]) -> str:
+    """Formate le rapport Phase 4."""
+    report = []
+    
+    report.append("\n" + "=" * 70)
+    report.append("PHASE 4: LE PREMIER VERDICT - Système de détection de canulars")
+    report.append("=" * 70)
+    
+    report.append("\n🎯 MODÈLE APPLIQUÉ:")
+    report.append("-" * 70)
+    report.append("Règle: Un relevé est classifié comme canular si le champ commentaire")
+    report.append("contient moins de 5 caractères (vide ou quasi-vide).")
+    
+    report.append(f"\n📊 DONNÉES D'ÉVALUATION:")
+    report.append("-" * 70)
+    report.append(f"Total observations : {len(model_eval['train_set']) + len(model_eval['test_set'])}")
+    report.append(f"Ensemble d'apprentissage (train) : {len(model_eval['train_set'])} observations (70%)")
+    report.append(f"Ensemble de test : {len(model_eval['test_set'])} observations (30%)")
+    report.append(f"Seed (déterministe) : 42")
+    
+    report.append(f"\n📈 RÉSULTATS SUR L'ENSEMBLE DE TEST (données non vues):")
+    report.append("-" * 70)
+    
+    tp, fp, fn = model_eval['tp'], model_eval['fp'], model_eval['fn']
+    precision = model_eval['precision_percent']
+    recall = model_eval['recall_percent']
+    
+    report.append(f"\nRÉCALL (Sensibilité) - Sur 100 canulars réels, combien le système en attrape:")
+    report.append(f"  → {recall:.1f}%")
+    report.append(f"  Détails: {tp} vrais positifs / ({tp} + {fn}) canulars totaux")
+    
+    report.append(f"\nPRÉCISION - Sur 100 relevés signalés canular, combien le sont vraiment:")
+    report.append(f"  → {precision:.1f}%")
+    report.append(f"  Détails: {tp} vrais positifs / ({tp} + {fp}) signalés canular")
+    
+    report.append(f"\n🔍 MATRICE DE CONFUSION (sur {len(model_eval['test_set'])} observations de test):")
+    report.append("-" * 70)
+    tn = len(model_eval['test_set']) - tp - fp - fn
+    report.append(f"  Vrais Positifs (TP)      : {tp:4d} (canulars bien détectés)")
+    report.append(f"  Faux Positifs (FP)      : {fp:4d} (vrais relevés marqués canular)")
+    report.append(f"  Vrais Négatifs (TN)     : {tn:4d} (vrais relevés bien classés)")
+    report.append(f"  Faux Négatifs (FN)      : {fn:4d} (canulars non détectés)")
+    
+    report.append(f"\n📋 INDICES DE L'ENSEMBLE DE TEST:")
+    report.append("-" * 70)
+    report.append(f"Indices des observations utilisées pour l'évaluation (30% des données):")
+    test_indices = sorted(model_eval['test_indices'])
+    report.append(f"Nombre total: {len(test_indices)}")
+    report.append(f"Plage: {min(test_indices)} à {max(test_indices)}")
+    report.append(f"Indices (premiers 20): {test_indices[:20]}")
+    if len(test_indices) > 20:
+        report.append(f"Indices (derniers 20): {test_indices[-20:]}")
+    
+    report.append(f"\n❌ EXEMPLES D'ERREURS:")
+    report.append("-" * 70)
+    
+    fp_examples = [p for p in model_eval['predictions'] if not p['true_label'] and p['predicted_label']][:3]
+    if fp_examples:
+        report.append(f"\nFaux positifs (3 premiers) - Vrais relevés marqués à tort canular:")
+        for ex in fp_examples:
+            report.append(f"  Ligne {ex['line_number']}: '{ex['comments'][:50]}'")
+    
+    fn_examples = [p for p in model_eval['predictions'] if p['true_label'] and not p['predicted_label']][:3]
+    if fn_examples:
+        report.append(f"\nFaux négatifs (3 premiers) - Canulars non détectés:")
+        for ex in fn_examples:
+            report.append(f"  Ligne {ex['line_number']}: '{ex['comments'][:50] if ex['comments'] else '[VIDE]'}'")
+    
+    return "\n".join(report)
+
+
 def format_phase3_report(hoax_analysis: Dict[str, Any], total_rows: int) -> str:
     """Formate le rapport Phase 3."""
     report = []
@@ -553,6 +695,22 @@ def main():
     print(f"  Proportion: {hoax_analysis['proportion']*100:.2f}%")
     print(f"  Seuil: < 5 caractères")
     
+    # ========== PHASE 4 ==========
+    print("\n\nPHASE 4: Le premier verdict - Évaluation du système")
+    print("-" * 70)
+    
+    # Entraîner et évaluer le modèle
+    model_eval = train_and_evaluate_model(loaded_rows)
+    
+    # Afficher le rapport Phase 4
+    print(format_phase4_report(model_eval))
+    
+    # Résumé
+    print(f"\n\nRÉSUMÉ PHASE 4:")
+    print(f"  Recall (sensibilité): {model_eval['recall_percent']:.1f}%")
+    print(f"  Precision: {model_eval['precision_percent']:.1f}%")
+    print(f"  Ensemble de test: {len(model_eval['test_set'])} observations (30%)")
+    
     return {
         'phase1': {
             'total_lines': total_lines,
@@ -560,7 +718,8 @@ def main():
             'problematic_rows': len(problematic_rows)
         },
         'phase2': analysis,
-        'phase3': hoax_analysis
+        'phase3': hoax_analysis,
+        'phase4': model_eval
     }
 
 

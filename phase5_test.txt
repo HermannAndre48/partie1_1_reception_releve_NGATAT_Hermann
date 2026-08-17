@@ -1,0 +1,21 @@
+﻿ANALYSE DES DONN╔ES OVNI
+======================================================================
+
+PHASE 1: Ouvrir la caisse
+----------------------------------------------------------------------
+python : Traceback (most recent call last):
+Au caractère Ligne:1 : 1
++ python analyse.py 2>&1 | Out-File phase5_test.txt -Encoding UTF8
++ ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "D:\partie1_1_reception_releve_NGATAT_Hermann\analyse.py", line 929, in <module>
+    main()
+  File "D:\partie1_1_reception_releve_NGATAT_Hermann\analyse.py", line 833, in main
+    loaded_rows, problematic_rows, total_lines = load_csv_data(str(filepath))
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\partie1_1_reception_releve_NGATAT_Hermann\analyse.py", line 44, in load_csv_data
+    for line_num, row in enumerate(reader, start=1):
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied

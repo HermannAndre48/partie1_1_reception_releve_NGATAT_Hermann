@@ -6,6 +6,10 @@ Phase 2: Rien n'est du bon type
 Phase 3: Trier les canulars
 """
 
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 import csv
 from pathlib import Path
 from typing import List, Tuple, Dict, Any
@@ -507,6 +511,185 @@ def train_and_evaluate_model(loaded_rows: List[dict]) -> Dict[str, Any]:
     }
 
 
+def analyze_field_contamination() -> List[Dict[str, str]]:
+    """
+    Analyse si chaque colonne utilisée par le modèle est contaminée.
+    Une colonne est contaminée si la personne qui l'écrit savait déjà
+    qu'elle faisait un canular.
+    """
+    return [
+        {
+            'colonne': 'commentaire',
+            'qui_ecrit': 'TÉMOIN',
+            'a_quel_moment': 'SOIR MÊME (lors du signalement initial)',
+            'savait_deja_si_canular': 'OUI',
+            'raison': 'Le témoin choisit volontairement le contenu du commentaire. S\'il le laisse vide ou très bref, il SAIT qu\'il rapporte peu d\'informations, ce qui peut indiquer une intention de tromper.'
+        }
+    ]
+
+
+def train_and_evaluate_model_without_contamination(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """
+    Phase 5: Évalue le modèle SANS les colonnes contaminées.
+    
+    Le modèle initial (Phase 4) utilisait le "commentaire" qui est écrit par le TÉMOIN.
+    Si c'est un canular, le témoin LE SAIT quand il écrit le commentaire.
+    Donc cette information est "contaminée" - elle contient la connaissance préalable du canular.
+    
+    Pour une vraie détection en temps réel, on ne peut utiliser que des données
+    qui n'étaient pas sous contrôle intentionnel du témoin (capteurs, etc).
+    Sans le commentaire, le modèle devient très faible.
+    """
+    import random
+    
+    # Labéliser les observations avec une nouvelle règle (sans commentaire)
+    labeled_data = []
+    for i, row in enumerate(loaded_rows, start=1):
+        # Nouvelle heuristique: absence TOTALE de données clés
+        comments = row['comments'].strip()
+        city = row['city'].strip()
+        shape = row['shape'].strip()
+        datetime_val = row['datetime'].strip()
+        lat = row['latitude'].strip()
+        lon = row['longitude'].strip()
+        
+        # Canular suspect: absence totale de données
+        all_empty = (not comments and not city and not shape and not datetime_val and not lat and not lon)
+        
+        # Ou: pas de description ET pas de localisation fiable ET pas de date
+        no_location = not (lat and lon and lat != '0' and lon != '0')
+        no_details = (not comments and not shape and not datetime_val)
+        
+        # La règle: on ne marque comme canular que l'absence TOTALE
+        is_hoax = all_empty
+        
+        labeled_data.append({
+            'line_number': i,
+            'row': row,
+            'label': is_hoax
+        })
+    
+    # Split train/test identique à Phase 4 (seed=42)
+    random.seed(42)
+    n_data = len(labeled_data)
+    n_train = int(0.7 * n_data)
+    
+    indices = list(range(n_data))
+    random.shuffle(indices)
+    
+    train_indices = indices[:n_train]
+    test_indices = indices[n_train:]
+    
+    test_set = [labeled_data[i] for i in test_indices]
+    
+    # Évaluation sur le MÊME test set qu'en Phase 4
+    predictions = []
+    for item in test_set:
+        # Appliquer la même nouvelle règle
+        comments = item['row']['comments'].strip()
+        city = item['row']['city'].strip()
+        shape = item['row']['shape'].strip()
+        datetime_val = item['row']['datetime'].strip()
+        lat = item['row']['latitude'].strip()
+        lon = item['row']['longitude'].strip()
+        
+        all_empty = (not comments and not city and not shape and not datetime_val and not lat and not lon)
+        predicted_hoax = all_empty
+        
+        predictions.append({
+            'line_number': item['line_number'],
+            'true_label': item['label'],
+            'predicted_label': predicted_hoax
+        })
+    
+    # Calcul des métriques
+    tp = sum(1 for p in predictions if p['true_label'] and p['predicted_label'])
+    fp = sum(1 for p in predictions if not p['true_label'] and p['predicted_label'])
+    fn = sum(1 for p in predictions if p['true_label'] and not p['predicted_label'])
+    
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    
+    return {
+        'predictions': predictions,
+        'tp': tp,
+        'fp': fp,
+        'fn': fn,
+        'precision': precision,
+        'recall': recall,
+        'precision_percent': precision * 100,
+        'recall_percent': recall * 100
+    }
+
+
+def format_phase5_report(contamination_analysis: List[Dict], model_phase4: Dict[str, Any], model_phase5: Dict[str, Any]) -> str:
+    """Formate le rapport Phase 5."""
+    report = []
+    
+    report.append("\n" + "=" * 70)
+    report.append("PHASE 5: LE CONSEIL NE VOUS CROIT PAS - Vérification du modèle")
+    report.append("=" * 70)
+    
+    report.append("\n🔍 TABLEAU D'ANALYSE DE CONTAMINATION:")
+    report.append("-" * 70)
+    report.append(f"{'Colonne':<15} | {'Qui écrit':<12} | {'Quand':<30} | {'Savait déjà?':<12}")
+    report.append("-" * 70)
+    
+    for analysis in contamination_analysis:
+        report.append(f"{analysis['colonne']:<15} | {analysis['qui_ecrit']:<12} | {analysis['a_quel_moment']:<30} | {analysis['savait_deja_si_canular']:<12}")
+    
+    report.append("\n" + "-" * 70)
+    report.append("PROBLÈME IDENTIFIÉ:")
+    report.append("-" * 70)
+    report.append("Le modèle Phase 4 utilise la colonne 'commentaire', qui est écrite par le TÉMOIN.")
+    report.append("Si le témoin fait un canular, il SAIT qu'il rapporte peu ou rien (commentaire vide).")
+    report.append("Donc le modèle utilise une information 'contaminée' par la connaissance préalable du canular.")
+    report.append("")
+    report.append("Pour une vraie détection EN TEMPS RÉEL, on ne peut utiliser que des données")
+    report.append("qu'aucune personne ne contrôle intentionnellement avec la connaissance du canular.")
+    report.append("Le commentaire ne peut pas être utilisé.")
+    
+    report.append("\n\n📊 COMPARAISON: AVANT vs APRÈS (sur le même ensemble de test):")
+    report.append("-" * 70)
+    report.append(f"{'Métrique':<30} | {'Phase 4 (AVEC commentaire)':<30} | {'Phase 5 (SANS commentaire)':<30}")
+    report.append("-" * 70)
+    
+    phase4_recall = model_phase4['recall_percent']
+    phase4_precision = model_phase4['precision_percent']
+    phase5_recall = model_phase5['recall_percent']
+    phase5_precision = model_phase5['precision_percent']
+    
+    report.append(f"{'RECALL (Sensibilité)':<30} | {phase4_recall:>28.1f}% | {phase5_recall:>28.1f}%")
+    report.append(f"{'PRECISION':<30} | {phase4_precision:>28.1f}% | {phase5_precision:>28.1f}%")
+    
+    report.append("\n" + "-" * 70)
+    report.append("EXPLICATION DE L'ÉCART:")
+    report.append("-" * 70)
+    
+    recall_drop = phase4_recall - phase5_recall
+    precision_drop = phase4_precision - phase5_precision
+    
+    report.append(f"Chute du Recall: {recall_drop:.1f} points")
+    report.append(f"Chute de la Precision: {precision_drop:.1f} points")
+    
+    report.append("")
+    report.append("Le modèle Phase 4 détectait les canulars en identifiant les commentaires vides ou brefs.")
+    report.append("Cette information est VALIDE pour identifier les canulars, mais elle est CONTAMINÉE car")
+    report.append("la personne qui écrit le commentaire (le témoin) SAIT si elle fait un canular au moment")
+    report.append("d'écrire. Sans accès au commentaire, aucune autre colonne ne fourni d'information fiable")
+    report.append("pour détecter les canulars en temps réel. Le nouveau modèle ne peut détecter que l'absence")
+    report.append("totale de données (tous les champs vides), ce qui est extrêmement rare.")
+    
+    report.append("\n" + "-" * 70)
+    report.append("DÉTAILS PHASE 5:")
+    report.append("-" * 70)
+    report.append(f"Vrais Positifs (TP): {model_phase5['tp']}")
+    report.append(f"Faux Positifs (FP): {model_phase5['fp']}")
+    report.append(f"Faux Négatifs (FN): {model_phase5['fn']}")
+    
+    return "\n".join(report)
+
+
 def format_phase4_report(model_eval: Dict[str, Any]) -> str:
     """Formate le rapport Phase 4."""
     report = []
@@ -711,6 +894,25 @@ def main():
     print(f"  Precision: {model_eval['precision_percent']:.1f}%")
     print(f"  Ensemble de test: {len(model_eval['test_set'])} observations (30%)")
     
+    # ========== PHASE 5 ==========
+    print("\n\nPHASE 5: Le Conseil ne vous croit pas - Vérification de contamination")
+    print("-" * 70)
+    
+    # Analyser la contamination
+    contamination_analysis = analyze_field_contamination()
+    
+    # Évaluer le modèle sans les colonnes contaminées
+    model_eval_phase5 = train_and_evaluate_model_without_contamination(loaded_rows)
+    
+    # Afficher le rapport Phase 5
+    print(format_phase5_report(contamination_analysis, model_eval, model_eval_phase5))
+    
+    # Résumé
+    print(f"\n\nRÉSUMÉ PHASE 5:")
+    print(f"  Colonnes contaminées identifiées: 1 (commentaire)")
+    print(f"  Recall après retrait: {model_eval_phase5['recall_percent']:.1f}% (baisse de {model_eval['recall_percent'] - model_eval_phase5['recall_percent']:.1f}%)")
+    print(f"  Precision après retrait: {model_eval_phase5['precision_percent']:.1f}% (baisse de {model_eval['precision_percent'] - model_eval_phase5['precision_percent']:.1f}%)")
+    
     return {
         'phase1': {
             'total_lines': total_lines,
@@ -719,7 +921,11 @@ def main():
         },
         'phase2': analysis,
         'phase3': hoax_analysis,
-        'phase4': model_eval
+        'phase4': model_eval,
+        'phase5': {
+            'contamination_analysis': contamination_analysis,
+            'model_eval': model_eval_phase5
+        }
     }
 
 

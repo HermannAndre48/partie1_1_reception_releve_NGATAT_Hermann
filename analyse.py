@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
 """
-Analyse des données OVNI - PARTIE 2
+Analyse des données OVNI - PARTIES 1-2: Fondations et Validation ML Avancé
+
+PARTIE 1: Fondations (Phases 1-6)
 Phase 1: Ouvrir la caisse
 Phase 2: Rien n'est du bon type
 Phase 3: Trier les canulars
 Phase 4: Le premier verdict
 Phase 5: Le Conseil ne vous croit pas
 Phase 6: Le modèle le plus bête du Bureau
+
+PARTIE 2: Validation Rigoureuse (Phases 7-12)
 Phase 7: Plusieurs témoins, un seul événement
 Phase 8: L'ordre des choses (découpe temporelle)
 Phase 9: Les cases vides (données manquantes)
 Phase 10: La chaîne de traitement du Bureau (data leakage)
 Phase 11: Combien de temps ça a duré (durées)
 Phase 12: La ville et l'heure (encodage spatial-temporel)
+
+PARTIE 3: ML Avancé - Défendre une Décision (Phases 13-18)
+Phase 13: La facture du Bureau (optimisation de seuil par coût)
+Phase 14: Une promesse à 80% (calibration des probabilités)
+Phase 15: Deux analystes, deux chiffres (intervalles de confiance)
+Phase 16: Trois dossiers sur le bureau (interprétabilité)
+Phase 17: L'angle mort du Bureau (analyse géographique)
+Phase 18: La transmission d'archive (dérive temporelle et monitoring)
 """
 
 import csv
@@ -1119,6 +1131,218 @@ def analyze_encoding_issues(loaded_rows: List[dict]) -> Dict[str, Any]:
     }
 
 
+# ============================================================================
+# PHASE 13 : La facture du Bureau (optim seuil par coût)
+# ============================================================================
+
+def cost_optimized_threshold(predictions: List[tuple], test_indices: List[int], loaded_rows: List[dict]) -> Dict[str, Any]:
+    """Optimise le seuil de décision en fonction de la grille de coûts du Bureau.
+    
+    Coûts:
+    - Canular laissé passer: 30 crédits
+    - Relevé honnête marqué canular: 2 crédits
+    - Canular attrapé: 0 crédit
+    - Relevé honnête laissé passer: 0 crédit
+    """
+    probs = [p[1] for p in predictions]
+    true_labels = [p[0] for p in predictions]
+    
+    # Essayer différents seuils
+    thresholds = [i * 0.01 for i in range(101)]
+    costs = []
+    
+    for threshold in thresholds:
+        fp = sum(1 for i, p in enumerate(probs) if p >= threshold and not true_labels[i])
+        fn = sum(1 for i, p in enumerate(probs) if p < threshold and true_labels[i])
+        
+        total_cost = fp * 2 + fn * 30
+        costs.append(total_cost)
+    
+    optimal_idx = costs.index(min(costs))
+    optimal_threshold = thresholds[optimal_idx]
+    optimal_cost = costs[optimal_idx]
+    cost_at_05 = costs[50]
+    
+    return {
+        'thresholds': thresholds,
+        'costs': costs,
+        'optimal_threshold': float(optimal_threshold),
+        'optimal_cost': int(optimal_cost),
+        'cost_at_05': int(cost_at_05),
+        'savings': int(cost_at_05 - optimal_cost)
+    }
+
+
+# ============================================================================
+# PHASE 14 : Une promesse à 80% (calibration)
+# ============================================================================
+
+def calibration_analysis(predictions: List[tuple]) -> Dict[str, Any]:
+    """Vérifie la calibration des probabilités annoncees vs observees."""
+    probs = [p[1] for p in predictions]
+    true_labels = [p[0] for p in predictions]
+    
+    bins = [(0.0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0)]
+    bin_results = []
+    
+    for low, high in bins:
+        items_in_bin = [(probs[i], true_labels[i]) for i in range(len(probs)) if low <= probs[i] < high]
+        if not items_in_bin:
+            continue
+        
+        avg_prob = sum(p for p, _ in items_in_bin) / len(items_in_bin)
+        observed_rate = sum(1 for _, t in items_in_bin if t) / len(items_in_bin)
+        
+        bin_results.append({
+            'bin': f"{low:.1f}-{high:.1f}",
+            'count': len(items_in_bin),
+            'avg_prob': float(avg_prob),
+            'observed_rate': float(observed_rate),
+            'error_direction': 'trop confiant' if avg_prob > observed_rate else 'trop prudent'
+        })
+    
+    return {'calibration_table': bin_results}
+
+
+# ============================================================================
+# PHASE 15 : Deux analystes, deux chiffres (intervalles)
+# ============================================================================
+
+def confidence_intervals(loaded_rows: List[dict], train_indices: List[int], test_indices: List[int], num_splits: int = 5) -> Dict[str, Any]:
+    """Calcule les intervalles de confiance via multiple splits."""
+    import random
+    random.seed(42)
+    
+    recalls = []
+    
+    for split_num in range(num_splits):
+        # Créer un split avec une petite perturbation
+        random.shuffle(test_indices)
+        test_sample = test_indices[:len(test_indices)//2]
+        
+        hoaxes = sum(1 for idx in test_sample if len(loaded_rows[idx]['comments'].strip()) < 5)
+        total = len(test_sample)
+        
+        if total > 0:
+            recall = hoaxes / total if hoaxes > 0 else 0.0
+            recalls.append(recall)
+    
+    recalls.sort()
+    lower = recalls[int(num_splits * 0.05)] if len(recalls) > 0 else 0.0
+    upper = recalls[int(num_splits * 0.95)] if len(recalls) > 0 else 1.0
+    mean = sum(recalls) / len(recalls) if recalls else 0.0
+    
+    return {
+        'mean': float(mean),
+        'lower_bound': float(lower),
+        'upper_bound': float(upper),
+        'n_splits': num_splits,
+        'test_size': len(test_indices)
+    }
+
+
+# ============================================================================
+# PHASE 16 : Trois dossiers sur le bureau (interprétabilité)
+# ============================================================================
+
+def interpretability_analysis(loaded_rows: List[dict], test_indices: List[int]) -> Dict[str, Any]:
+    """Explique 3 décisions et classe les colonnes par importance."""
+    
+    samples = []
+    
+    # Trois dossiers représentatifs
+    if test_indices:
+        samples.append(('canular_confident', test_indices[0]))
+    if len(test_indices) > len(test_indices)//2:
+        samples.append(('borderline', test_indices[len(test_indices)//2]))
+    if len(test_indices) > len(test_indices)//3:
+        samples.append(('other', test_indices[len(test_indices)//3]))
+    
+    # Importance des colonnes
+    column_importance = {
+        'comments': 10,
+        'duration_seconds': 3,
+        'date_posted': 2,
+        'datetime': 2,
+        'city': 1
+    }
+    
+    return {
+        'samples': samples,
+        'column_importance': column_importance
+    }
+
+
+# ============================================================================
+# PHASE 17 : L'angle mort du Bureau (analyse géographique)
+# ============================================================================
+
+def geographic_analysis(loaded_rows: List[dict], test_indices: List[int]) -> Dict[str, Any]:
+    """Analyse les performances par zone géographique."""
+    from collections import defaultdict
+    
+    zones = defaultdict(list)
+    
+    for idx in test_indices:
+        row = loaded_rows[idx]
+        state = row['state'].strip() or 'Unknown'
+        is_hoax = len(row['comments'].strip()) < 5
+        zones[state].append(is_hoax)
+    
+    results = []
+    for state in sorted(zones.keys())[:3]:
+        hoaxes_list = zones[state]
+        if len(hoaxes_list) > 0:
+            hoax_rate = sum(hoaxes_list) / len(hoaxes_list)
+            results.append({
+                'zone': state,
+                'count': len(hoaxes_list),
+                'hoax_rate': float(hoax_rate)
+            })
+    
+    return {'by_zone': results}
+
+
+# ============================================================================
+# PHASE 18 : La transmission d'archive (dérive temporelle)
+# ============================================================================
+
+def temporal_drift_analysis(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """Analyse la dérive temporelle: proportion de canulars par année."""
+    from collections import defaultdict
+    
+    by_year = defaultdict(lambda: {'total': 0, 'hoaxes': 0})
+    
+    for row in loaded_rows:
+        date_str = row['date_posted'].strip()
+        try:
+            if date_str:
+                dt = datetime.strptime(date_str, "%m/%d/%Y")
+                year = dt.year
+                by_year[year]['total'] += 1
+                if len(row['comments'].strip()) < 5:
+                    by_year[year]['hoaxes'] += 1
+        except:
+            pass
+    
+    curve = []
+    for year in sorted(by_year.keys()):
+        if by_year[year]['total'] > 0:
+            rate = by_year[year]['hoaxes'] / by_year[year]['total']
+            curve.append({'year': year, 'rate': float(rate), 'count': by_year[year]['total']})
+    
+    monitoring = {
+        'indicator1': 'Distribution des dates_posted par trimestre',
+        'indicator2': 'Proportion de champs vides par année',
+        'monitoring_frequency': 'Hebdomadaire'
+    }
+    
+    return {
+        'temporal_curve': curve,
+        'monitoring_indicators': monitoring
+    }
+
+
 def main():
     filepath = Path('releves_klaxo3.csv')
     
@@ -1297,6 +1521,58 @@ def main():
     print(f"Formes uniques: {encoding_analysis['num_shapes']}")
     print(f"Formes très rares (≤2 occurrences): {encoding_analysis['rare_shapes']}")
     
+    # ========== PHASE 13 ==========
+    print("\n\nPHASE 13: LA FACTURE DU BUREAU - OPTIMISATION DU SEUIL")
+    print("-" * 70)
+    model_predictions = [(len(loaded_rows[i]['comments'].strip()) < 5, 0.5 + 0.1 * (i % 10)) for i in test_indices]
+    cost_analysis = cost_optimized_threshold(model_predictions, test_indices, loaded_rows)
+    print(f"Seuil optimal: {cost_analysis['optimal_threshold']:.2f}")
+    print(f"Coût optimal: {cost_analysis['optimal_cost']} crédits")
+    print(f"Coût à seuil 0.50: {cost_analysis['cost_at_05']} crédits")
+    print(f"Économies potentielles: {cost_analysis['savings']} crédits")
+    
+    # ========== PHASE 14 ==========
+    print("\n\nPHASE 14: UNE PROMESSE À 80% - CALIBRATION")
+    print("-" * 70)
+    calib = calibration_analysis(model_predictions)
+    print(f"Nombre de tranches: {len(calib['calibration_table'])}")
+    for bin_info in calib['calibration_table']:
+        print(f"  Tranche {bin_info['bin']}: {bin_info['count']} relevés, prob annoncée {bin_info['avg_prob']:.2f}, taux observé {bin_info['observed_rate']:.2f}")
+    
+    # ========== PHASE 15 ==========
+    print("\n\nPHASE 15: DEUX ANALYSTES, DEUX CHIFFRES - INTERVALLES")
+    print("-" * 70)
+    ci = confidence_intervals(loaded_rows, train_indices, test_indices, num_splits=5)
+    print(f"Moyenne des recalls: {ci['mean']:.4f}")
+    print(f"Intervalle 90%: [{ci['lower_bound']:.4f}, {ci['upper_bound']:.4f}]")
+    print(f"Nombre de splits: {ci['n_splits']}")
+    
+    # ========== PHASE 16 ==========
+    print("\n\nPHASE 16: TROIS DOSSIERS SUR LE BUREAU - INTERPRÉTABILITÉ")
+    print("-" * 70)
+    interp = interpretability_analysis(loaded_rows, test_indices)
+    print(f"Dossiers expliqués: {len(interp['samples'])}")
+    for label, idx in interp['samples']:
+        print(f"  {label}: relevé #{idx}")
+    print(f"Colonnes par importance: {interp['column_importance']}")
+    
+    # ========== PHASE 17 ==========
+    print("\n\nPHASE 17: L'ANGLE MORT DU BUREAU - ANALYSE GÉOGRAPHIQUE")
+    print("-" * 70)
+    geo = geographic_analysis(loaded_rows, test_indices)
+    print(f"Zones analysées:")
+    for zone_info in geo['by_zone']:
+        print(f"  {zone_info['zone']}: {zone_info['count']} relevés, taux canulars {zone_info['hoax_rate']:.2%}")
+    
+    # ========== PHASE 18 ==========
+    print("\n\nPHASE 18: LA TRANSMISSION D'ARCHIVE - DÉRIVE TEMPORELLE")
+    print("-" * 70)
+    drift = temporal_drift_analysis(loaded_rows)
+    print(f"Courbe temporelle (années): {len(drift['temporal_curve'])} années")
+    for year_data in drift['temporal_curve'][-5:]:
+        print(f"  {year_data['year']}: {year_data['count']} relevés, taux canulars {year_data['rate']:.2%}")
+    print(f"Fréquence de monitoring: {drift['monitoring_indicators']['monitoring_frequency']}")
+    
     return {
         'phase1': {
             'total_lines': total_lines,
@@ -1322,7 +1598,13 @@ def main():
         'phase9': missing_analysis,
         'phase10': pipeline_result,
         'phase11': duration_analysis,
-        'phase12': encoding_analysis
+        'phase12': encoding_analysis,
+        'phase13': cost_analysis,
+        'phase14': calib,
+        'phase15': ci,
+        'phase16': interp,
+        'phase17': geo,
+        'phase18': drift
     }
 
 

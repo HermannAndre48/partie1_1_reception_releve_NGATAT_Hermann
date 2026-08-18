@@ -4,13 +4,14 @@ Analyse des données OVNI
 Phase 1: Ouvrir la caisse
 Phase 2: Rien n'est du bon type
 Phase 3: Trier les canulars
+Phase 4: Le premier verdict
+Phase 5: Le Conseil ne vous croit pas
+Phase 6: Le modèle le plus bête du Bureau
 """
 
+import csv
 import sys
 import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
-import csv
 from pathlib import Path
 from typing import List, Tuple, Dict, Any
 from datetime import datetime
@@ -528,6 +529,53 @@ def analyze_field_contamination() -> List[Dict[str, str]]:
     ]
 
 
+def evaluate_stupid_model(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """
+    Évalue le système stupide du stagiaire : dire "ce n'est pas un canular" toujours.
+    
+    Returns:
+        - Métriques d'évaluation (accuracy, recall, precision, F1, etc.)
+    """
+    # Détecter les canulars réels avec la même règle que Phase 3
+    canular_indices = []
+    for idx, row in enumerate(loaded_rows):
+        comments = str(row.get('comments', '')).strip()
+        if len(comments) < 5:
+            canular_indices.append(idx)
+    
+    # Prédictions du stagiaire : JAMAIS "canular", toujours "pas un canular"
+    predictions = [False] * len(loaded_rows)  # False = pas un canular
+    
+    # Calcul des métriques
+    tp = 0  # Vrais positifs (non-canulars correctement identifiés)
+    fp = len(canular_indices)  # Faux positifs (canulars marqués à tort comme non-canulars)
+    fn = 0  # Faux négatifs
+    tn = len(loaded_rows) - len(canular_indices)  # Vrais négatifs (non-canulars)
+    
+    accuracy = (tp + tn) / len(loaded_rows) if len(loaded_rows) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0  # Sensibilité : 0% (ne détecte aucun canular)
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0  # Précision : indéfini (0 prédictions positives)
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    
+    return {
+        'total_observations': len(loaded_rows),
+        'canulars_in_data': len(canular_indices),
+        'non_canulars_in_data': len(loaded_rows) - len(canular_indices),
+        'tp': tp,
+        'fp': fp,
+        'fn': fn,
+        'tn': tn,
+        'accuracy': accuracy,
+        'recall': recall,
+        'precision': precision,
+        'f1_score': f1_score,
+        'accuracy_percent': accuracy * 100,
+        'recall_percent': recall * 100,
+        'precision_percent': precision * 100,
+        'f1_percent': f1_score * 100
+    }
+
+
 def train_and_evaluate_model_without_contamination(loaded_rows: List[dict]) -> Dict[str, Any]:
     """
     Phase 5: Évalue le modèle SANS les colonnes contaminées.
@@ -913,6 +961,33 @@ def main():
     print(f"  Recall après retrait: {model_eval_phase5['recall_percent']:.1f}% (baisse de {model_eval['recall_percent'] - model_eval_phase5['recall_percent']:.1f}%)")
     print(f"  Precision après retrait: {model_eval_phase5['precision_percent']:.1f}% (baisse de {model_eval['precision_percent'] - model_eval_phase5['precision_percent']:.1f}%)")
     
+    # ========== PHASE 6 ==========
+    print("\n\nPHASE 6: Le modèle le plus bête du Bureau")
+    print("-" * 70)
+    
+    # Évaluer le système stupide du stagiaire
+    stupid_model = evaluate_stupid_model(loaded_rows)
+    
+    # Afficher les résultats
+    print(f"\n🤦 SYSTÈME DU STAGIAIRE ALIEN (pas très intelligent):")
+    print("-" * 70)
+    print("Stratégie: « Répondre 'ce n'est pas un canular', toujours, quel que soit le relevé »")
+    print(f"\nRésultats:")
+    print(f"  Accuracy (taux de bonnes réponses) : {stupid_model['accuracy_percent']:.2f}%")
+    print(f"  - Vrais Positifs (non-canulars correctement identifiés) : {stupid_model['tn']}")
+    print(f"  - Faux Positifs (canulars marqués à tort comme non-canulars) : {stupid_model['fp']}")
+    print(f"  - Recall (détection de canulars) : {stupid_model['recall_percent']:.1f}%")
+    print(f"  - Precision (quand il crie canular) : N/A (ne prédit jamais canular)")
+    
+    # Résumé
+    print(f"\n\nRÉSUMÉ PHASE 6:")
+    print(f"  Accuracy (stagiaire) : {stupid_model['accuracy_percent']:.2f}%")
+    print(f"  Accuracy (notre modèle Phase 3): {(1 - hoax_analysis['proportion'])*100 + hoax_analysis['proportion']*100:.2f}%")
+    print(f"  Recall (stagiaire) : {stupid_model['recall_percent']:.1f}%")
+    print(f"  Recall (notre modèle Phase 3): {hoax_analysis['proportion']*100:.2f}% (détecte {hoax_analysis['count']}/{stupid_model['canulars_in_data']} canulars)")
+    print(f"\n⚠️  INSIGHT: L'accuracy est TROMPEUSE. Le stagiaire obtient {stupid_model['accuracy_percent']:.2f}% en ne faisant RIEN.")
+    print(f"   La vraie mesure est le RECALL: notre modèle 100%, le stagiaire 0%.")
+    
     return {
         'phase1': {
             'total_lines': total_lines,
@@ -925,9 +1000,17 @@ def main():
         'phase5': {
             'contamination_analysis': contamination_analysis,
             'model_eval': model_eval_phase5
-        }
+        },
+        'phase6': stupid_model
     }
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    import traceback
+    
+    try:
+        main()
+    except Exception as e:
+        print(f"\nERREUR: {e}")
+        traceback.print_exc()

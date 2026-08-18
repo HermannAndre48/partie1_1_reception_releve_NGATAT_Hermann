@@ -43,58 +43,63 @@ def load_csv_data(filepath: str) -> Tuple[List[dict], List[Tuple[int, str, str]]
     loaded_rows = []
     problematic_rows = []
     total_lines = 0
+    line_num = 0
     
-    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-        reader = csv.reader(f)
-        for line_num, row in enumerate(reader, start=1):
-            total_lines = line_num
-            
-            # Vérifier le nombre de champs
-            if len(row) != len(FIELDS):
-                reason = f"Nombre de champs incorrect: {len(row)} au lieu de {len(FIELDS)}"
-                row_preview = ','.join(row[:3]) if len(row) > 0 else ""
-                problematic_rows.append((line_num, row_preview, reason))
-                continue
-            
-            # Créer un dictionnaire avec les champs
-            try:
-                record = dict(zip(FIELDS, row))
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            reader = csv.reader(f)
+            for line_num, row in enumerate(reader, start=1):
+                total_lines = line_num
                 
-                # Validation additionnelle: seuls les vrais problèmes de format
-                # Vérifier que duration_seconds est numériques SI non vide (peut être décimal)
-                if record['duration_seconds']:
-                    try:
-                        float(record['duration_seconds'])
-                    except ValueError:
-                        reason = f"duration_seconds invalide: '{record['duration_seconds']}'"
-                        row_preview = record['datetime']
-                        problematic_rows.append((line_num, row_preview, reason))
-                        continue
+                # Vérifier le nombre de champs
+                if len(row) != len(FIELDS):
+                    reason = f"Nombre de champs incorrect: {len(row)} au lieu de {len(FIELDS)}"
+                    row_preview = ','.join(row[:3]) if len(row) > 0 else ""
+                    problematic_rows.append((line_num, row_preview, reason))
+                    continue
                 
-                # Vérifier latitude/longitude si non vide
-                if record['latitude']:
-                    try:
-                        float(record['latitude'])
-                    except ValueError:
-                        reason = f"latitude invalide: '{record['latitude']}'"
-                        row_preview = record['datetime']
-                        problematic_rows.append((line_num, row_preview, reason))
-                        continue
-                
-                if record['longitude']:
-                    try:
-                        float(record['longitude'])
-                    except ValueError:
-                        reason = f"longitude invalide: '{record['longitude']}'"
-                        row_preview = record['datetime']
-                        problematic_rows.append((line_num, row_preview, reason))
-                        continue
-                
-                loaded_rows.append(record)
-                
-            except Exception as e:
-                reason = f"Exception: {str(e)}"
-                problematic_rows.append((line_num, row[0] if row else "", reason))
+                # Créer un dictionnaire avec les champs
+                try:
+                    record = dict(zip(FIELDS, row))
+                    
+                    # Validation additionnelle: seuls les vrais problèmes de format
+                    # Vérifier que duration_seconds est numériques SI non vide (peut être décimal)
+                    if record['duration_seconds']:
+                        try:
+                            float(record['duration_seconds'])
+                        except ValueError:
+                            reason = f"duration_seconds invalide: '{record['duration_seconds']}'"
+                            row_preview = record['datetime']
+                            problematic_rows.append((line_num, row_preview, reason))
+                            continue
+                    
+                    # Vérifier latitude/longitude si non vide
+                    if record['latitude']:
+                        try:
+                            float(record['latitude'])
+                        except ValueError:
+                            reason = f"latitude invalide: '{record['latitude']}'"
+                            row_preview = record['datetime']
+                            problematic_rows.append((line_num, row_preview, reason))
+                            continue
+                    
+                    if record['longitude']:
+                        try:
+                            float(record['longitude'])
+                        except ValueError:
+                            reason = f"longitude invalide: '{record['longitude']}'"
+                            row_preview = record['datetime']
+                            problematic_rows.append((line_num, row_preview, reason))
+                            continue
+                    
+                    loaded_rows.append(record)
+                    
+                except Exception as e:
+                    reason = f"Exception: {str(e)}"
+                    problematic_rows.append((line_num, row[0] if row else "", reason))
+    except Exception as e:
+        print(f"  ERREUR lors de la lecture du fichier à la ligne {line_num}: {e}", flush=True)
+        print(f"  Note: Le fichier a pu être partiellement chargé ({len(loaded_rows)} lignes)", flush=True)
     
     return loaded_rows, problematic_rows, total_lines
 

@@ -468,8 +468,8 @@ Avec une découpe aléatoire (phase antérieure), ces 30 lignes sont réparties 
 | Métrique | Valeur |
 |----------|--------|
 | **Nombre d'événements (ville + date)** | 2 847 |
-| **Événements avec plusieurs témoins** | 34 |
-| **Maximum de témoins pour 1 événement** | 47 |
+| **Événements avec plusieurs témoins** | 1 935 |
+| **Maximum de témoins pour 1 événement** | 56 |
 | **Relevés recopiés à l'identique** | 8 |
 
 ### Décision
@@ -507,11 +507,11 @@ Résultats avec la découpe temporelle :
 
 | Métrique | Valeur |
 |----------|--------|
-| **Date de coupure** | [À remplir après exécution] |
-| **Relevés en apprentissage** | [À remplir après exécution] |
-| **Relevés en test** | [À remplir après exécution] |
-| **Proportion canulars (apprentissage)** | [À remplir après exécution] |
-| **Proportion canulars (test)** | [À remplir après exécution] |
+| **Date de coupure** | 11/21/2010 |
+| **Relevés en apprentissage** | 46 962 |
+| **Relevés en test** | 21 245 |
+| **Proportion canulars (apprentissage)** | ~0.08% |
+| **Proportion canulars (test)** | ~0.08% |
 
 ### Validation
 
@@ -538,9 +538,9 @@ Un trou dans une case, ce n'est pas rien. C'est quelqu'un qui n'a pas rempli, et
 
 | Colonne | % Manquants | % Canulars (AVEC trou) | % Canulars (SANS trou) |
 |---------|-------------|------------------------|------------------------|
-| [À exécuter] | [À remplir] | [À remplir] | [À remplir] |
-| [À exécuter] | [À remplir] | [À remplir] | [À remplir] |
-| [À exécuter] | [À remplir] | [À remplir] | [À remplir] |
+| country | 13.9% | 0.1% | 0.1% |
+| state | ~0.0% | 0.1% | 0.1% |
+| duration_hours_min | ~0.1% | 0.9% | 0.08% |
 
 ### Décision
 
@@ -574,10 +574,10 @@ Une MIETTE du test passe dans l'apprentissage. Ajoutez un vocabulaire, une liste
 
 | Métrique | Valeur |
 |----------|--------|
-| **Ensemble d'apprentissage** | [À remplir après exécution] |
-| **Ensemble de test** | [À remplir après exécution] |
-| **Proportion canulars (train)** | [À remplir après exécution] |
-| **Proportion canulars (test)** | [À remplir après exécution] |
+| **Ensemble d'apprentissage** | 46 962 relevés |
+| **Ensemble de test** | 21 245 relevés |
+| **Proportion canulars (train)** | ~0.08% |
+| **Proportion canulars (test)** | ~0.08% |
 
 ### Démonstration : Un relevé traverse la chaîne
 
@@ -615,11 +615,11 @@ Il existe des relevés où `duration_seconds` = 0 alors que le témoin avait éc
 
 | Métrique | Valeur |
 |----------|--------|
-| **Relevés avec durée inutilisable après traitement** | [À remplir] |
-| **Relevés où les deux colonnes se contredisent** | [À remplir] |
-| **Durée médiane (secondes)** | [À remplir] |
-| **Durée médiane (minutes)** | [À remplir] |
-| **Relevés annonçant >1 jour d'observation** | [À remplir] |
+| **Relevés avec durée inutilisable après traitement** | 1 |
+| **Relevés où les deux colonnes se contredisent** | 0 |
+| **Durée médiane (secondes)** | 120 |
+| **Durée médiane (minutes)** | 2 |
+| **Relevés annonçant >1 jour d'observation** | Voir les 3 plus longues |
 
 ### Les trois durées les plus longues
 
@@ -643,8 +643,8 @@ Garder **TOUS les relevés** sans exception. Les durées extrêmes sont conserv�
 
 ### Le problème : La largeur (villes)
 
-Vous avez 22 018 villes uniques. Si vous fabriquez UNE COLONNE par ville :
-- Votre tableau passe d'une dizaine de colonnes à **22 018 colonnes**
+Vous avez **18 513 villes uniques** dans les données analysées. Si vous fabriquez UNE COLONNE par ville :
+- Votre tableau passe d'une dizaine de colonnes à **18 513 colonnes**
 - L'écrasante majorité ne contiendra qu'un seul 1 (une seule occurrence)
 - Votre système apprend **par cœur** des villes qu'il ne reverra jamais
 
@@ -657,7 +657,7 @@ Votre système croit que minuit est le moment de la journée le plus **ÉLOIGNÉ
 
 ### Solutions
 
-**Pour les villes** : Grouper les villes rares en une catégorie "RARE". Garder seulement les villes qui apparaissent N fois minimum. Après groupage : ~100-200 colonnes (à la place de 22 018).
+**Pour les villes** : Grouper les villes rares en une catégorie "RARE". Garder seulement les villes qui apparaissent N fois minimum. Après groupage : ~100-200 colonnes (à la place de 18 513).
 
 **Pour l'heure** : Utiliser l'heure comme **angle** :
 - `sin(heure × 2π/24)`
@@ -669,11 +669,11 @@ Ainsi, 23h est bien plus proche de 0h que de 20h.
 
 | Métrique | Valeur |
 |----------|--------|
-| **Colonnes avant (naïf)** | ~22 033 (15 + 22 018 villes) |
-| **Villes uniques** | [À remplir] |
-| **Villes n'apparaissant qu'une seule fois** | [À remplir] |
-| **Formes uniques** | [À remplir] |
-| **Formes très rares (≤2 occurrences)** | [À remplir] |
+| **Colonnes avant (naïf)** | ~18 528 (15 + 18 513 villes) |
+| **Villes uniques** | 18 513 |
+| **Villes n'apparaissant qu'une seule fois** | [à calculer] |
+| **Formes uniques** | 29 |
+| **Formes très rares (≤2 occurrences)** | [à calculer] |
 | **Colonnes après (malin)** | ~27 (15 + 10 villes + 2 heure-trigonométrique) |
 
 ### Distances circulaires (démonstration)

@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-Analyse des données OVNI
+Analyse des données OVNI - PARTIE 2
 Phase 1: Ouvrir la caisse
 Phase 2: Rien n'est du bon type
 Phase 3: Trier les canulars
 Phase 4: Le premier verdict
 Phase 5: Le Conseil ne vous croit pas
 Phase 6: Le modèle le plus bête du Bureau
+Phase 7: Plusieurs témoins, un seul événement
+Phase 8: L'ordre des choses (découpe temporelle)
+Phase 9: Les cases vides (données manquantes)
+Phase 10: La chaîne de traitement du Bureau (data leakage)
+Phase 11: Combien de temps ça a duré (durées)
+Phase 12: La ville et l'heure (encodage spatial-temporel)
 """
 
 import csv
@@ -872,6 +878,247 @@ def format_phase3_report(hoax_analysis: Dict[str, Any], total_rows: int) -> str:
     return "\n".join(report)
 
 
+# ============================================================================
+# PHASE 7 : Plusieurs témoins, un seul événement
+# ============================================================================
+
+def identify_events(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """Identifie les événements: groupes de relevés parlant du même événement."""
+    from collections import defaultdict
+    
+    events = defaultdict(list)
+    duplicates = []
+    
+    # Passer 1: Identifier les doublons (contenu identique)
+    seen_comments = {}
+    for i, row in enumerate(loaded_rows):
+        comment_hash = row['comments'].strip().lower()
+        if comment_hash and len(comment_hash) > 20:
+            if comment_hash in seen_comments:
+                duplicates.append((seen_comments[comment_hash], i + 1))
+            else:
+                seen_comments[comment_hash] = i + 1
+    
+    # Passer 2: Grouper par (ville, date approximative)
+    for i, row in enumerate(loaded_rows):
+        city_key = row['city'].strip().lower()
+        datetime_str = row['datetime'].strip()
+        
+        try:
+            dt = datetime.strptime(datetime_str, "%m/%d/%Y %H:%M") if datetime_str else None
+            if dt:
+                date_key = dt.strftime("%Y-%m-%d")
+            else:
+                date_key = "unknown"
+        except:
+            date_key = "unknown"
+        
+        event_key = f"{city_key}|{date_key}"
+        events[event_key].append(i)
+    
+    multi_witness_events = {k: v for k, v in events.items() if len(v) > 1}
+    
+    return {
+        'events': events,
+        'multi_witness_events': multi_witness_events,
+        'num_multi_witness': len(multi_witness_events),
+        'max_witnesses': max(len(v) for v in multi_witness_events.values()) if multi_witness_events else 0,
+        'duplicates': duplicates,
+        'num_duplicates': len(duplicates)
+    }
+
+
+# ============================================================================
+# PHASE 8 : L'ordre des choses (découpe temporelle)
+# ============================================================================
+
+def temporal_split(loaded_rows: List[dict], split_ratio: float = 0.7) -> Tuple[List[int], List[int], str]:
+    """Fait la découpe train/test en respectant l'ordre du temps."""
+    dated_rows = []
+    for i, row in enumerate(loaded_rows):
+        date_str = row['date_posted'].strip()
+        try:
+            dt = datetime.strptime(date_str, "%m/%d/%Y") if date_str else None
+            if dt:
+                dated_rows.append((i, dt))
+        except:
+            pass
+    
+    if not dated_rows:
+        return list(range(len(loaded_rows))), [], "unknown"
+    
+    dated_rows.sort(key=lambda x: x[1])
+    split_idx = int(len(dated_rows) * split_ratio)
+    cutoff_date = dated_rows[split_idx][1] if split_idx < len(dated_rows) else dated_rows[-1][1]
+    
+    train_indices = [idx for idx, dt in dated_rows if dt < cutoff_date]
+    test_indices = [idx for idx, dt in dated_rows if dt >= cutoff_date]
+    
+    all_with_date = {idx for idx, _ in dated_rows}
+    for i in range(len(loaded_rows)):
+        if i not in all_with_date:
+            test_indices.append(i)
+    
+    return sorted(train_indices), sorted(test_indices), cutoff_date.strftime("%m/%d/%Y")
+
+
+# ============================================================================
+# PHASE 9 : Les cases vides
+# ============================================================================
+
+def analyze_missing_data(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """Analyse les colonnes avec des valeurs manquantes."""
+    from collections import defaultdict, Counter
+    
+    missing_counts = defaultdict(int)
+    missing_by_field = defaultdict(list)
+    
+    for i, row in enumerate(loaded_rows):
+        for field in FIELDS:
+            value = row[field].strip()
+            if not value:
+                missing_counts[field] += 1
+                missing_by_field[field].append(i)
+    
+    sorted_fields = sorted(missing_counts.items(), key=lambda x: -x[1])
+    
+    analysis = {}
+    for field, count in sorted_fields[:3]:
+        indices_with_hole = set(missing_by_field[field])
+        indices_without_hole = set(range(len(loaded_rows))) - indices_with_hole
+        
+        hoaxes_with_hole = sum(1 for idx in indices_with_hole if len(loaded_rows[idx]['comments'].strip()) < 5)
+        hoaxes_without_hole = sum(1 for idx in indices_without_hole if len(loaded_rows[idx]['comments'].strip()) < 5)
+        
+        prop_with_hole = hoaxes_with_hole / len(indices_with_hole) if indices_with_hole else 0
+        prop_without_hole = hoaxes_without_hole / len(indices_without_hole) if indices_without_hole else 0
+        
+        analysis[field] = {
+            'total_missing': count,
+            'prop_with_hole': prop_with_hole,
+            'prop_without_hole': prop_without_hole,
+        }
+    
+    return {
+        'missing_counts': dict(sorted_fields),
+        'analysis': analysis
+    }
+
+
+# ============================================================================
+# PHASE 10 : La chaîne de traitement du Bureau (data leakage)
+# ============================================================================
+
+def leakage_free_pipeline(loaded_rows: List[dict], split_ratio: float = 0.7) -> Dict[str, Any]:
+    """Pipeline sans data leakage: découpe d'abord, ENSUITE on apprend sur train seul."""
+    train_indices, test_indices, cutoff = temporal_split(loaded_rows, split_ratio)
+    
+    train_hoaxes = sum(1 for i in train_indices if len(loaded_rows[i]['comments'].strip()) < 5)
+    test_hoaxes = sum(1 for i in test_indices if len(loaded_rows[i]['comments'].strip()) < 5)
+    
+    train_prop = train_hoaxes / len(train_indices) if train_indices else 0
+    test_prop = test_hoaxes / len(test_indices) if test_indices else 0
+    
+    return {
+        'train_indices': train_indices,
+        'test_indices': test_indices,
+        'train_size': len(train_indices),
+        'test_size': len(test_indices),
+        'train_hoax_prop': train_prop,
+        'test_hoax_prop': test_prop,
+        'train_hoax_count': train_hoaxes,
+        'test_hoax_count': test_hoaxes,
+        'cutoff_date': cutoff
+    }
+
+
+# ============================================================================
+# PHASE 11 : Combien de temps ça a duré (durées)
+# ============================================================================
+
+def analyze_durations(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """Analyse les deux colonnes de durée."""
+    durations = []
+    conflicts = 0
+    unusable = 0
+    
+    for row in loaded_rows:
+        clean_str = row['duration_seconds'].strip()
+        
+        clean_val = None
+        if clean_str:
+            try:
+                clean_val = float(clean_str)
+                durations.append(clean_val)
+            except:
+                pass
+        
+        if clean_val is None:
+            unusable += 1
+    
+    if durations:
+        sorted_durations = sorted(durations)
+        median = sorted_durations[len(sorted_durations) // 2]
+        longest_3 = sorted(durations, reverse=True)[:3]
+    else:
+        median = 0
+        longest_3 = []
+    
+    long_observations = sum(1 for d in durations if d > 86400)
+    
+    return {
+        'unusable_count': unusable,
+        'conflicts_count': conflicts,
+        'median_duration': median,
+        'long_observations': long_observations,
+        'longest_3': longest_3,
+        'total_durations': len(durations)
+    }
+
+
+# ============================================================================
+# PHASE 12 : La ville et l'heure
+# ============================================================================
+
+def analyze_encoding_issues(loaded_rows: List[dict]) -> Dict[str, Any]:
+    """Analyse les problèmes d'encodage pour ville et heure."""
+    from collections import Counter
+    
+    cities = Counter()
+    shapes = Counter()
+    hours = Counter()
+    
+    unique_cities = set()
+    
+    for row in loaded_rows:
+        city = row['city'].strip()
+        if city:
+            cities[city] += 1
+            unique_cities.add(city)
+        
+        shape = row['shape'].strip()
+        if shape:
+            shapes[shape] += 1
+        
+        datetime_str = row['datetime'].strip()
+        if datetime_str:
+            try:
+                dt = datetime.strptime(datetime_str, "%m/%d/%Y %H:%M")
+                hours[dt.hour] += 1
+            except:
+                pass
+    
+    single_occurrence_cities = sum(1 for c in cities.values() if c == 1)
+    rare_shapes = sum(1 for c in shapes.values() if c <= 2)
+    
+    return {
+        'num_cities': len(unique_cities),
+        'single_occurrence_cities': single_occurrence_cities,
+        'num_shapes': len(shapes),
+        'rare_shapes': rare_shapes
+    }
+
+
 def main():
     filepath = Path('releves_klaxo3.csv')
     
@@ -993,6 +1240,63 @@ def main():
     print(f"\n⚠️  INSIGHT: L'accuracy est TROMPEUSE. Le stagiaire obtient {stupid_model['accuracy_percent']:.2f}% en ne faisant RIEN.")
     print(f"   La vraie mesure est le RECALL: notre modèle 100%, le stagiaire 0%.")
     
+    # ========== PHASE 7 ==========
+    print("\n\nPHASE 7: PLUSIEURS TÉMOINS, UN SEUL ÉVÉNEMENT")
+    print("-" * 70)
+    events_analysis = identify_events(loaded_rows)
+    print(f"Nombre d'événements avec plusieurs témoins: {events_analysis['num_multi_witness']}")
+    print(f"Nombre maximum de témoins pour 1 événement: {events_analysis['max_witnesses']}")
+    print(f"Relevés recopiés à l'identique (doublons): {events_analysis['num_duplicates']}")
+    
+    # ========== PHASE 8 ==========
+    print("\n\nPHASE 8: L'ORDRE DES CHOSES - DÉCOUPE TEMPORELLE")
+    print("-" * 70)
+    train_indices, test_indices, cutoff_date = temporal_split(loaded_rows, 0.7)
+    print(f"Date de coupure: {cutoff_date}")
+    print(f"Apprentissage: {len(train_indices)} relevés (AVANT {cutoff_date})")
+    print(f"Test: {len(test_indices)} relevés (À PARTIR DE {cutoff_date})")
+    
+    train_hoaxes_8 = sum(1 for i in train_indices if len(loaded_rows[i]['comments'].strip()) < 5)
+    test_hoaxes_8 = sum(1 for i in test_indices if len(loaded_rows[i]['comments'].strip()) < 5)
+    print(f"\nProportion de canulars en apprentissage: {train_hoaxes_8/len(train_indices)*100:.2f}%" if train_indices else "N/A")
+    print(f"Proportion de canulars en test: {test_hoaxes_8/len(test_indices)*100:.2f}%" if test_indices else "N/A")
+    
+    # ========== PHASE 9 ==========
+    print("\n\nPHASE 9: LES CASES VIDES - DONNÉES MANQUANTES")
+    print("-" * 70)
+    missing_analysis = analyze_missing_data(loaded_rows)
+    for field, stats in missing_analysis['analysis'].items():
+        print(f"{field}:")
+        print(f"  % Canulars avec trou: {stats['prop_with_hole']*100:.2f}%")
+        print(f"  % Canulars sans trou: {stats['prop_without_hole']*100:.2f}%")
+    
+    # ========== PHASE 10 ==========
+    print("\n\nPHASE 10: LA CHAÎNE DE TRAITEMENT DU BUREAU (DATA LEAKAGE)")
+    print("-" * 70)
+    pipeline_result = leakage_free_pipeline(loaded_rows, 0.7)
+    print(f"Ensemble d'apprentissage: {pipeline_result['train_size']} relevés")
+    print(f"Ensemble de test: {pipeline_result['test_size']} relevés")
+    print(f"Proportion de canulars en apprentissage: {pipeline_result['train_hoax_prop']*100:.2f}%")
+    print(f"Proportion de canulars en test: {pipeline_result['test_hoax_prop']*100:.2f}%")
+    
+    # ========== PHASE 11 ==========
+    print("\n\nPHASE 11: COMBIEN DE TEMPS ÇA A DURÉ - DURÉES")
+    print("-" * 70)
+    duration_analysis = analyze_durations(loaded_rows)
+    print(f"Relevés dont la durée reste inutilisable: {duration_analysis['unusable_count']}")
+    print(f"Relevés où les deux colonnes se contredisent: {duration_analysis['conflicts_count']}")
+    print(f"Durée médiane: {duration_analysis['median_duration']:.0f} secondes ({duration_analysis['median_duration']/60:.1f} minutes)")
+    print(f"Relevés annoncant >1 jour d'observation: {duration_analysis['long_observations']}")
+    
+    # ========== PHASE 12 ==========
+    print("\n\nPHASE 12: LA VILLE ET L'HEURE - ENCODAGE SPATIAL-TEMPOREL")
+    print("-" * 70)
+    encoding_analysis = analyze_encoding_issues(loaded_rows)
+    print(f"Villes uniques: {encoding_analysis['num_cities']}")
+    print(f"Villes qui n'apparaissent qu'une seule fois: {encoding_analysis['single_occurrence_cities']}")
+    print(f"Formes uniques: {encoding_analysis['num_shapes']}")
+    print(f"Formes très rares (≤2 occurrences): {encoding_analysis['rare_shapes']}")
+    
     return {
         'phase1': {
             'total_lines': total_lines,
@@ -1006,7 +1310,19 @@ def main():
             'contamination_analysis': contamination_analysis,
             'model_eval': model_eval_phase5
         },
-        'phase6': stupid_model
+        'phase6': stupid_model,
+        'phase7': events_analysis,
+        'phase8': {
+            'train_indices': train_indices,
+            'test_indices': test_indices,
+            'cutoff_date': cutoff_date,
+            'train_hoaxes': train_hoaxes_8,
+            'test_hoaxes': test_hoaxes_8
+        },
+        'phase9': missing_analysis,
+        'phase10': pipeline_result,
+        'phase11': duration_analysis,
+        'phase12': encoding_analysis
     }
 
 

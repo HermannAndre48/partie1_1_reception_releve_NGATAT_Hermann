@@ -623,9 +623,9 @@ Il existe des relevés où `duration_seconds` = 0 alors que le témoin avait éc
 
 ### Les trois durées les plus longues
 
-1. [À remplir]
-2. [À remplir]
-3. [À remplir]
+1. Birmingham (UK/England) - 97 836 000 secondes (27 176h 40m) - 3,1 années
+2. Ottawa (Canada) - 82 800 000 secondes (23 000h) - 2,6 années
+3. Don't know - 52 623 200 secondes (14 618h 11m) - 1,7 années
 
 ### Décision
 

@@ -1511,6 +1511,12 @@ def main():
     print(f"Relevés où les deux colonnes se contredisent: {duration_analysis['conflicts_count']}")
     print(f"Durée médiane: {duration_analysis['median_duration']:.0f} secondes ({duration_analysis['median_duration']/60:.1f} minutes)")
     print(f"Relevés annoncant >1 jour d'observation: {duration_analysis['long_observations']}")
+    print("\nLes trois durées les plus longues:")
+    for i, dur in enumerate(duration_analysis['longest_3'][:3], 1):
+        h = int(dur // 3600)
+        m = int((dur % 3600) // 60)
+        s = int(dur % 60)
+        print(f"  {i}. {int(dur)} secondes ({h}h {m}m {s}s)")
     
     # ========== PHASE 12 ==========
     print("\n\nPHASE 12: LA VILLE ET L'HEURE - ENCODAGE SPATIAL-TEMPOREL")
